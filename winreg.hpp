@@ -183,7 +183,7 @@ class RegKey
     void Open(
         HKEY hKeyParent,
         const std::wstring &subKey,
-        REGSAM desiredAccess = KEY_READ | KEY_WRITE);
+        REGSAM desiredAccess = KEY_READ);
 
     //
     // Registry Value Setters
