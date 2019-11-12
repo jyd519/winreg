@@ -1,5 +1,29 @@
 ﻿var myModule;
 process.env.DEBUG = "xxx";
+
+function require_hook(name) {
+  console.log('require', name);
+  if (name.endsWith('winreg.node')) {
+    return `D:\\ata\\joytest\\addon\\winreg\\build\\release\\winreg.node`;
+    }
+  return name;
+}
+
+var Module = require('module');
+var _require = Module.prototype.require;
+Module.prototype.require = function reallyNeedRequire(name, options) {
+    options = options || {};
+    
+    name = require_hook(name);
+    var nameToLoad = Module._resolveFilename(name, this);
+    if (options.bust) {
+        delete require.cache[nameToLoad];
+    }
+    console.log('require',nameToLoad);
+    return _require.call(this, nameToLoad);
+};
+
+
 if (process.env.DEBUG) {
     myModule = require('./build/Debug/winreg.node')
 } else {

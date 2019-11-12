@@ -152,12 +152,24 @@ NAN_METHOD(RegKey::Create) {
 
 NAN_METHOD(RegKey::Open) {
     RegKey *obj = Nan::ObjectWrap::Unwrap<RegKey>(info.Holder());
-    obj->openKey(info);
+    try {
+      obj->openKey(info);
+    } catch( const winreg::RegException& e) {
+      ThrowRegError(e);
+    } catch (const std::exception& e) {
+      Nan::ThrowError(e.what());
+    }
 }
 
 NAN_METHOD(RegKey::Close) {
     RegKey *obj = Nan::ObjectWrap::Unwrap<RegKey>(info.Holder());
-    obj->_key.Close();
+    try {
+      obj->_key.Close();
+    } catch( const winreg::RegException& e) {
+      ThrowRegError(e);
+    } catch (const std::exception& e) {
+      Nan::ThrowError(e.what());
+    }
 }
 
 NAN_GETTER(RegKey::IsValid) {
