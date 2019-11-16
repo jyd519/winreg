@@ -1,1 +1,1 @@
-electron-rebuild -v 5.0.6 -a ia32 -w winreg
+node-gyp rebuild --arch=ia32 --release

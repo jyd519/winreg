@@ -270,12 +270,12 @@ class RegException
 {
   public:
     RegException(const char *message, LONG errorCode)
-        : std::runtime_error{message}, m_errorCode{errorCode}
+        : RegException(std::string(message), errorCode)
     {
     }
 
     RegException(const std::string &message, LONG errorCode)
-        : std::runtime_error{message}, m_errorCode{errorCode}
+        : std::runtime_error{message + ": " + std::to_string(errorCode)}, m_errorCode{errorCode}
     {
     }
 

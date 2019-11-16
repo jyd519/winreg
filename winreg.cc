@@ -39,7 +39,6 @@ public:
 
 private:
   winreg::RegKey _key;
-
   Napi::Value createKey(const Napi::CallbackInfo& info);
   Napi::Value openKey(const Napi::CallbackInfo& info);
 };
@@ -165,6 +164,9 @@ Napi::Value RegKey::Open(const Napi::CallbackInfo& info) {
     return this->openKey(info);
   }
   catch (const winreg::RegException& e) {
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND) {
+      return Napi::Boolean::New(env, false);
+    }
     ThrowRegError(e);
     return env.Null();
   }
@@ -204,6 +206,9 @@ Napi::Value RegKey::GetString(const Napi::CallbackInfo& info)
     return Napi::String::New(env, convert.to_bytes(v));
   }
   catch (const winreg::RegException& e) {
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
+      return info[1];
+    }
     ThrowRegError(e);
     return env.Null();
   }
@@ -222,6 +227,10 @@ Napi::Value RegKey::GetDword(const Napi::CallbackInfo& info)
     return Napi::Number::New(env, (uint32_t)v);
   }
   catch (const winreg::RegException& e) {
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
+      return info[1];
+    }
+
     ThrowRegError(e);
     return env.Null();
   }
@@ -234,10 +243,20 @@ Napi::Value RegKey::GetDword(const Napi::CallbackInfo& info)
 Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info)
 {
   auto option = winreg::RegKey::ExpandStringOption::Expand;
-  if (info.Length() > 0) {
-    auto dontExpand = info[0].As<Napi::Boolean>().Value();
-    if (dontExpand) {
-      option = winreg::RegKey::ExpandStringOption::DontExpand;
+  int defval = -1;
+  if (info.Length() > 1) {
+    if (info[1].IsBoolean()) {
+      auto dontExpand = info[1].As<Napi::Boolean>().Value();
+      if (dontExpand) {
+        option = winreg::RegKey::ExpandStringOption::DontExpand;
+      }
+      if (info.Length() > 2 &&info[2].IsString()) {
+        defval = 2;
+      }
+    } else {
+      if (info[1].IsString()) {
+        defval = 1;
+      }
     }
   }
 
@@ -249,6 +268,9 @@ Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info)
     return Napi::String::New(env, convert.to_bytes(v));
   }
   catch (const winreg::RegException& e) {
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && defval > 0) {
+      return info[defval];
+    }
     ThrowRegError(e);
     return env.Null();
   }
@@ -273,6 +295,10 @@ Napi::Value RegKey::GetMultiString(const Napi::CallbackInfo& info)
     return arr;
   }
   catch (const winreg::RegException& e) {
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
+      return info[1];
+    }
+
     ThrowRegError(e);
     return env.Null();
   }

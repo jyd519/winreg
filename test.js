@@ -1,5 +1,4 @@
 ﻿var myModule;
-process.env.DEBUG = "xxx";
 
 function require_hook(name) {
   console.log('require', name);
@@ -60,12 +59,23 @@ describe("winreg", function() {
     it("open and close" , function() {
       var k = new myModule.RegKey();
       assert.ok(!k.isValid);
-      k.open(myModule.HKEY_CURRENT_USER, "Software\\Python\\PythonCore\\3.6")
+      const r = k.open(myModule.HKEY_CURRENT_USER, "Software\\Python\\PythonCore\\3.6")      
+      assert(r);
       assert(k.isValid);
+      assert(r.getString("aaaaa", "123"), "123");
       k.close();
       assert.ok(!k.isValid);
     });
 
+    it("open no error" , function() {
+      var k = new myModule.RegKey();
+      assert.ok(!k.isValid);
+      const r = k.open(myModule.HKEY_CURRENT_USER, "Software\\Python\\xxxx")
+      assert(!r);
+      assert.ok(!k.isValid);      
+      k.close();
+      assert.ok(!k.isValid);
+    });
   });
 
 
