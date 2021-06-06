@@ -4,13 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "joytest": "node-gyp rebuild",
+    "joytest32": "node-gyp rebuild --arch=ia32"
   },
   "dependencies": {
-    "node-addon-api": "1.7.1",
     "chai": "^4.2.0",
     "mocha": "^5.2.0",
-    "node-addon-api": "^1.6.3",
+    "node-addon-api": "^3.0.0"
   },
   "keywords": [],
   "author": "",

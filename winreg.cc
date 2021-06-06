@@ -6,15 +6,32 @@
 #include <locale>
 #include <codecvt>
 
-std::wstring Utf8ToUtf16(const std::string &str);
+std::wstring Utf8ToUtf16(const std::string& str);
 
 #define ThrowRegError(e) ThrowRegErrorImpl(env, e)
 
-void ThrowRegErrorImpl(Napi::Env env, const winreg::RegException& e);
+NAPI_NO_RETURN void ThrowRegErrorImpl(Napi::Env env,
+                                      const winreg::RegException& e);
 
-class RegKey : public Napi::ObjectWrap<RegKey>
-{
-public:
+#define REG_TRY \
+  auto env = info.Env(); \
+  try  
+
+#define REG_CATCH \
+   catch (const winreg::RegException& e) { \
+    if (e.ErrorCode() == ERROR_FILE_NOT_FOUND) { \
+      return Napi::Boolean::New(env, false); \
+    } \
+    ThrowRegError(e); \
+    return env.Null(); \
+  } catch (const std::exception& e) { \
+    Napi::Error::New(env, e.what()).ThrowAsJavaScriptException(); \
+    return env.Null(); \
+  } 
+
+
+class RegKey : public Napi::ObjectWrap<RegKey> {
+ public:
   static Napi::Object Init(Napi::Env env, Napi::Object exports);
 
   RegKey(const Napi::CallbackInfo& info);
@@ -22,6 +39,7 @@ public:
   Napi::Value Create(const Napi::CallbackInfo& info);
   Napi::Value Open(const Napi::CallbackInfo& info);
   Napi::Value Close(const Napi::CallbackInfo& info);
+  Napi::Value GetKey(const Napi::CallbackInfo& info);
   Napi::Value GetString(const Napi::CallbackInfo& info);
   Napi::Value GetExpandString(const Napi::CallbackInfo& info);
   Napi::Value GetMultiString(const Napi::CallbackInfo& info);
@@ -35,55 +53,42 @@ public:
   Napi::Value EnumValues(const Napi::CallbackInfo& info);
   Napi::Value IsValid(const Napi::CallbackInfo& info);
 
-  static Napi::FunctionReference constructor;
-
-private:
+ private:
   winreg::RegKey _key;
   Napi::Value createKey(const Napi::CallbackInfo& info);
   Napi::Value openKey(const Napi::CallbackInfo& info);
 };
 
-Napi::FunctionReference RegKey::constructor;
-
-Napi::Object RegKey::Init(Napi::Env env, Napi::Object exports)
-{
+Napi::Object RegKey::Init(Napi::Env env, Napi::Object exports) {
   // This method is used to hook the accessor and method callbacks
-  Napi::Function func = DefineClass(env, "RegKey", {
-    InstanceMethod("open", &Open),
-    InstanceMethod("create", &Create),
-    InstanceMethod("close", &Close),
-    InstanceMethod("getString", &GetString),
-    InstanceMethod("getExpandString", &GetExpandString),
-    InstanceMethod("getMultiString", &GetMultiString),
-    InstanceMethod("getDword", &GetDword),
-    InstanceMethod("setString", &SetString),
-    InstanceMethod("setDword", &SetDword),
-    InstanceMethod("setExpandString", &SetExpandString),
-    InstanceMethod("deleteValue", &DeleteValue),
-    InstanceMethod("deleteKey", &DeleteKey),
-    InstanceMethod("enumSubKeys", &EnumSubKeys),
-    InstanceMethod("enumValues", &EnumValues),
-    InstanceAccessor("isValid", &IsValid, nullptr)
-    }
-  );
-  // Create a peristent reference to the class constructor. This will
-  // allow a function called on a class prototype and a function called on
-  // instance of a class to be distinguished from each other.
-  constructor = Napi::Persistent(func);
-  // Call the SuppressDestruct() method on the static data prevent the
-  // calling to this destructor to reset the reference when the
-  // environment is no longer available.
-  constructor.SuppressDestruct();
+  Napi::Function func = DefineClass(
+      env, "RegKey",
+      {InstanceMethod("open", &Open), InstanceMethod("create", &Create),
+       InstanceMethod("close", &Close), InstanceMethod("getString", &GetString),
+       InstanceMethod("handle", &GetKey),
+       InstanceMethod("getExpandString", &GetExpandString),
+       InstanceMethod("getMultiString", &GetMultiString),
+       InstanceMethod("getDword", &GetDword),
+       InstanceMethod("setString", &SetString),
+       InstanceMethod("setDword", &SetDword),
+       InstanceMethod("setExpandString", &SetExpandString),
+       InstanceMethod("deleteValue", &DeleteValue),
+       InstanceMethod("deleteKey", &DeleteKey),
+       InstanceMethod("enumSubKeys", &EnumSubKeys),
+       InstanceMethod("enumValues", &EnumValues),
+       InstanceAccessor("isValid", &IsValid, nullptr)});
   exports.Set("RegKey", func);
   return exports;
 }
 
-RegKey::RegKey(const Napi::CallbackInfo& info) : Napi::ObjectWrap<RegKey>(info) {
+RegKey::RegKey(const Napi::CallbackInfo& info)
+    : Napi::ObjectWrap<RegKey>(info) {
   auto env = info.Env();
   // throw an error if constructor is called without new keyword
-  if (!info.IsConstructCall())
-  {
-    Napi::Error::New(env, Napi::String::New(env, "RegKey::New - called without new keyword")).ThrowAsJavaScriptException();
+  if (!info.IsConstructCall()) {
+    Napi::Error::New(
+        env, Napi::String::New(env, "RegKey::New - called without new keyword"))
+        .ThrowAsJavaScriptException();
     return;
   }
 
@@ -94,32 +99,43 @@ Napi::Value RegKey::createKey(const Napi::CallbackInfo& info) {
   if (info.Length() == 0) {
   } else if (info.Length() == 2) {
     // expect arguments to be numbers
-    if (!info[0].IsNumber() || !info[1].IsString())
-    {
-      Napi::Error::New(info.Env(), Napi::String::New(info.Env(), "RegKey::New - expected arguments to be numbers and string")).ThrowAsJavaScriptException();
+    if (!info[0].IsNumber() || !info[1].IsString()) {
+      Napi::Error::New(
+          info.Env(),
+          Napi::String::New(
+              info.Env(),
+              "RegKey::New - expected arguments to be numbers and string"))
+          .ThrowAsJavaScriptException();
       return info.Env().Null();
     }
 
     HKEY hkey = (HKEY)info[0].As<Napi::Number>().Int64Value();
     std::string p = info[1].As<Napi::String>();
-    this->_key.Create(hkey, Utf8ToUtf16(p));
+
+    REG_TRY{
+      this->_key.Create(hkey, Utf8ToUtf16(p));
+      return info.This();
+    } REG_CATCH 
   } else if (info.Length() == 3) {
     // expect arguments to be numbers
-    if (!info[0].IsNumber() || !info[1].IsString() || !info[2].IsNumber())
-    {
-      Napi::Error::New(info.Env(), Napi::String::New(info.Env(), "RegKey::New - invalid arguments")).ThrowAsJavaScriptException();
+    if (!info[0].IsNumber() || !info[1].IsString() || !info[2].IsNumber()) {
+      Napi::Error::New(
+          info.Env(),
+          Napi::String::New(info.Env(), "RegKey::New - invalid arguments"))
+          .ThrowAsJavaScriptException();
       return info.Env().Null();
     }
     HKEY hkey = (HKEY)info[0].As<Napi::Number>().Int64Value();
     std::string p = info[1].As<Napi::String>();
     DWORD access = (DWORD)info[2].As<Napi::Number>().Uint32Value();
-    this->_key.Create(hkey, Utf8ToUtf16(p), access);
+    REG_TRY{
+      this->_key.Create(hkey, Utf8ToUtf16(p), access);
+    } REG_CATCH 
   }
 
   // return the wrapped javascript instance
   return info.This();
 }
-
 
 Napi::Value RegKey::openKey(const Napi::CallbackInfo& info) {
   auto env = info.Env();
@@ -127,9 +143,12 @@ Napi::Value RegKey::openKey(const Napi::CallbackInfo& info) {
     //
   } else if (info.Length() == 2) {
     // expect arguments to be numbers
-    if (!info[0].IsNumber() || !info[1].IsString())
-    {
-      Napi::Error::New(env, Napi::String::New(env, "RegKey::New - expected arguments to be numbers and string")).ThrowAsJavaScriptException();
+    if (!info[0].IsNumber() || !info[1].IsString()) {
+      Napi::Error::New(
+          env,
+          Napi::String::New(
+              env, "RegKey::New - expected arguments to be numbers and string"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
 
@@ -138,9 +157,10 @@ Napi::Value RegKey::openKey(const Napi::CallbackInfo& info) {
     this->_key.Open(hkey, Utf8ToUtf16(p));
   } else if (info.Length() == 3) {
     // expect arguments to be numbers
-    if (!info[0].IsNumber() || !info[1].IsString() || !info[2].IsNumber())
-    {
-      Napi::Error::New(env, Napi::String::New(env, "RegKey::New - invalid arguments")).ThrowAsJavaScriptException();
+    if (!info[0].IsNumber() || !info[1].IsString() || !info[2].IsNumber()) {
+      Napi::Error::New(
+          env, Napi::String::New(env, "RegKey::New - invalid arguments"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
     HKEY hkey = (HKEY)info[0].As<Napi::Number>().Int64Value();
@@ -162,15 +182,13 @@ Napi::Value RegKey::Open(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     return this->openKey(info);
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     if (e.ErrorCode() == ERROR_FILE_NOT_FOUND) {
       return Napi::Boolean::New(env, false);
     }
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -181,12 +199,10 @@ Napi::Value RegKey::Close(const Napi::CallbackInfo& info) {
   try {
     this->_key.Close();
     return info.This();
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
   }
 }
@@ -196,52 +212,49 @@ Napi::Value RegKey::IsValid(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(env, this->_key.IsValid());
 }
 
-Napi::Value RegKey::GetString(const Napi::CallbackInfo& info)
-{
+Napi::Value RegKey::GetKey(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+  return Napi::Number::New(env, (int64_t) this->_key.Get());
+}
+
+Napi::Value RegKey::GetString(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     std::string p = info[0].As<Napi::String>();
     auto v = this->_key.GetStringValue(Utf8ToUtf16(p));
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> convert;
     return Napi::String::New(env, convert.to_bytes(v));
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
       return info[1];
     }
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
 }
 
-Napi::Value RegKey::GetDword(const Napi::CallbackInfo& info)
-{
+Napi::Value RegKey::GetDword(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     std::string p = info[0].As<Napi::String>();
     auto v = this->_key.GetDwordValue(Utf8ToUtf16(p));
     return Napi::Number::New(env, (uint32_t)v);
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
       return info[1];
     }
 
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
   }
 }
 
-
-Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info)
-{
+Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info) {
   auto option = winreg::RegKey::ExpandStringOption::Expand;
   int defval = -1;
   if (info.Length() > 1) {
@@ -250,7 +263,7 @@ Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info)
       if (dontExpand) {
         option = winreg::RegKey::ExpandStringOption::DontExpand;
       }
-      if (info.Length() > 2 &&info[2].IsString()) {
+      if (info.Length() > 2 && info[2].IsString()) {
         defval = 2;
       }
     } else {
@@ -266,23 +279,19 @@ Napi::Value RegKey::GetExpandString(const Napi::CallbackInfo& info)
     auto v = this->_key.GetExpandStringValue(Utf8ToUtf16(p), option);
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> convert;
     return Napi::String::New(env, convert.to_bytes(v));
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && defval > 0) {
       return info[defval];
     }
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
 }
 
-
-Napi::Value RegKey::GetMultiString(const Napi::CallbackInfo& info)
-{
+Napi::Value RegKey::GetMultiString(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     std::string p = info[0].As<Napi::String>();
@@ -293,16 +302,14 @@ Napi::Value RegKey::GetMultiString(const Napi::CallbackInfo& info)
       (arr).Set(i, Napi::String::New(env, convert.to_bytes(vec[i])));
     }
     return arr;
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     if (e.ErrorCode() == ERROR_FILE_NOT_FOUND && info.Length() > 1) {
       return info[1];
     }
 
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -312,7 +319,10 @@ Napi::Value RegKey::SetString(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     if (info.Length() != 2 || !info[0].IsString() || !info[1].IsString()) {
-      Napi::Error::New(env, Napi::String::New(env, "Invalid argment: two string arguments is required")).ThrowAsJavaScriptException();
+      Napi::Error::New(
+          env, Napi::String::New(
+                   env, "Invalid argment: two string arguments is required"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
 
@@ -320,12 +330,10 @@ Napi::Value RegKey::SetString(const Napi::CallbackInfo& info) {
     std::string value = info[1].As<Napi::String>();
     this->_key.SetStringValue(Utf8ToUtf16(name), Utf8ToUtf16(value));
     return Napi::Number::New(env, 0);
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -335,7 +343,10 @@ Napi::Value RegKey::SetExpandString(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     if (info.Length() != 2 || !info[0].IsString() || !info[1].IsString()) {
-      Napi::Error::New(env, Napi::String::New(env, "Invalid argment: two string arguments is required")).ThrowAsJavaScriptException();
+      Napi::Error::New(
+          env, Napi::String::New(
+                   env, "Invalid argment: two string arguments is required"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
 
@@ -343,12 +354,10 @@ Napi::Value RegKey::SetExpandString(const Napi::CallbackInfo& info) {
     auto value = info[1].As<Napi::String>();
     this->_key.SetExpandStringValue(Utf8ToUtf16(name), Utf8ToUtf16(value));
     return info.This();
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -358,18 +367,21 @@ Napi::Value RegKey::SetDword(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     if (info.Length() != 2 || !info[0].IsString() || !info[1].IsNumber()) {
-      Napi::Error::New(env, Napi::String::New(env, "Invalid argment: name(string), value(number) required")).ThrowAsJavaScriptException();
+      Napi::Error::New(
+          env,
+          Napi::String::New(
+              env, "Invalid argment: name(string), value(number) required"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
     std::string name = info[0].As<Napi::String>();
-    this->_key.SetDwordValue(Utf8ToUtf16(name), info[1].As<Napi::Number>().Uint32Value());
+    this->_key.SetDwordValue(Utf8ToUtf16(name),
+                             info[1].As<Napi::Number>().Uint32Value());
     return info.This();
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -378,19 +390,20 @@ Napi::Value RegKey::DeleteValue(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     if (info.Length() != 1 || !info[0].IsString()) {
-      Napi::Error::New(env, Napi::String::New(env, "Invalid argment: a string argument is required")).ThrowAsJavaScriptException();
+      Napi::Error::New(
+          env, Napi::String::New(
+                   env, "Invalid argment: a string argument is required"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
 
     auto s = info[0].As<Napi::String>();
     this->_key.DeleteValue(Utf8ToUtf16(s));
     return info.This();
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -400,19 +413,20 @@ Napi::Value RegKey::DeleteKey(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     if (info.Length() != 2 || !info[0].IsString() || !info[1].IsNumber()) {
-      Napi::Error::New(env, Napi::String::New(env, "Invalid argment: name, false")).ThrowAsJavaScriptException();
+      Napi::Error::New(env,
+                       Napi::String::New(env, "Invalid argment: name, false"))
+          .ThrowAsJavaScriptException();
       return env.Null();
     }
 
     std::string s = info[0].As<Napi::String>();
-    this->_key.DeleteKey(Utf8ToUtf16(s), info[1].As<Napi::Number>().Uint32Value());
+    this->_key.DeleteKey(Utf8ToUtf16(s),
+                         info[1].As<Napi::Number>().Uint32Value());
     return info.This();
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -428,12 +442,10 @@ Napi::Value RegKey::EnumSubKeys(const Napi::CallbackInfo& info) {
       (arr).Set(i, Napi::String::New(env, convert.to_bytes(v[i])));
     }
     return arr;
-  }
-  catch (const winreg::RegException& e) {
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -443,45 +455,44 @@ Napi::Value RegKey::EnumValues(const Napi::CallbackInfo& info) {
   auto env = info.Env();
   try {
     auto v = this->_key.EnumValues();
-    auto arr = Napi::Array::New(env, v.size());
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> convert;
+    auto obj = Napi::Object::New(env);
     for (size_t i = 0; i < v.size(); ++i) {
-      auto obj = Napi::Object::New(env);
-      obj.Set("name", Napi::String::New(env, convert.to_bytes(v[i].first)));
-      obj.Set("type", Napi::Number::New(env, (uint32_t)v[i].second));
-      arr.Set(i, obj);
+      obj.Set(Napi::String::New(env, convert.to_bytes(v[i].first)),
+              Napi::Number::New(env, (uint32_t)v[i].second));
     }
-    return arr;
-  }
-  catch (const winreg::RegException& e) {
+    return obj;
+  } catch (const winreg::RegException& e) {
     ThrowRegError(e);
     return env.Null();
-  }
-  catch (const std::exception& e) {
+  } catch (const std::exception& e) {
     Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
     return env.Null();
   }
 }
 
-NAPI_NO_RETURN void ThrowRegErrorImpl(Napi::Env env, const winreg::RegException& e) {
+NAPI_NO_RETURN void ThrowRegErrorImpl(Napi::Env env,
+                                      const winreg::RegException& e) {
   auto err = Napi::Error::New(env, e.what());
   err.Set(Napi::String::New(env, "name"), Napi::String::New(env, "RegError"));
-  err.Set(Napi::String::New(env, "code"), Napi::Number::New(env, e.ErrorCode()));
+  err.Set(Napi::String::New(env, "code"),
+          Napi::Number::New(env, e.ErrorCode()));
   err.ThrowAsJavaScriptException();
 }
 
-std::wstring Utf8ToUtf16(const std::string &str)
-{
+std::wstring Utf8ToUtf16(const std::string& str) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> convert;
   return convert.from_bytes(str);
 }
 
-Napi::Object InitModule(Napi::Env env, Napi::Object exports)
-{
+Napi::Object InitModule(Napi::Env env, Napi::Object exports) {
   RegKey::Init(env, exports);
-  exports.Set("HKEY_CLASSES_ROOT", Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_CLASSES_ROOT));
-  exports.Set("HKEY_LOCAL_MACHINE", Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_LOCAL_MACHINE));
-  exports.Set("HKEY_CURRENT_USER", Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_CURRENT_USER));
+  exports.Set("HKEY_CLASSES_ROOT",
+              Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_CLASSES_ROOT));
+  exports.Set("HKEY_LOCAL_MACHINE",
+              Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_LOCAL_MACHINE));
+  exports.Set("HKEY_CURRENT_USER",
+              Napi::Number::New(env, (uint32_t)(ULONG_PTR)HKEY_CURRENT_USER));
 
   exports.Set("KEY_WOW64_32KEY", Napi::Number::New(env, KEY_WOW64_32KEY));
   exports.Set("KEY_WOW64_64KEY", Napi::Number::New(env, KEY_WOW64_64KEY));

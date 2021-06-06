@@ -269,13 +269,8 @@ class RegException
     : public std::runtime_error
 {
   public:
-    RegException(const char *message, LONG errorCode)
-        : RegException(std::string(message), errorCode)
-    {
-    }
-
     RegException(const std::string &message, LONG errorCode)
-        : std::runtime_error{message + ": " + std::to_string(errorCode)}, m_errorCode{errorCode}
+        : std::runtime_error(""), m_message(message + " code=" + std::to_string(errorCode)), m_errorCode{errorCode}
     {
     }
 
@@ -285,8 +280,10 @@ class RegException
         return m_errorCode;
     }
 
+    virtual const char* what() const noexcept { return m_message.c_str(); }
   private:
     // Error code, as returned by Windows registry APIs
+    std::string m_message;
     LONG m_errorCode;
 };
 
