@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+     "debug": "node-gyp --debug configure build",
     "joytest": "node-gyp rebuild",
     "joytest32": "node-gyp rebuild --arch=ia32"
   },
