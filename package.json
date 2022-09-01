@@ -5,16 +5,18 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-     "debug": "node-gyp --debug configure build",
-    "joytest": "node-gyp rebuild",
+    "debug": "node-gyp --debug configure build",
+    "build": "node-gyp build",
+    "joytest": "node-gyp rebuild --arch=x64",
     "joytest32": "node-gyp rebuild --arch=ia32"
   },
   "dependencies": {
-    "chai": "^4.2.0",
-    "mocha": "^5.2.0",
     "node-addon-api": "^3.0.0"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "jest": "^29.0.1"
+  }
 }

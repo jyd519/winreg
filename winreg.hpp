@@ -282,8 +282,8 @@ class RegException
 
     virtual const char* what() const noexcept { return m_message.c_str(); }
   private:
-    // Error code, as returned by Windows registry APIs
     std::string m_message;
+    // Error code, as returned by Windows registry APIs
     LONG m_errorCode;
 };
 
@@ -471,7 +471,7 @@ inline void RegKey::Create(
     DWORD *const disposition)
 {
     HKEY hKey{nullptr};
-    LONG retCode = ::RegCreateKeyEx(
+    LONG retCode = ::RegCreateKeyExW(
         hKeyParent,
         subKey.c_str(),
         0,        // reserved
@@ -499,6 +499,10 @@ inline void RegKey::Open(
     const REGSAM desiredAccess)
 {
     HKEY hKey{nullptr};
+
+    // Safely close any previously opened key
+    Close();
+
     LONG retCode = ::RegOpenKeyEx(
         hKeyParent,
         subKey.c_str(),
@@ -509,9 +513,6 @@ inline void RegKey::Open(
     {
         throw RegException{"RegOpenKeyEx failed.", retCode};
     }
-
-    // Safely close any previously opened key
-    Close();
 
     // Take ownership of the newly created key
     m_hKey = hKey;
@@ -801,7 +802,7 @@ inline std::wstring RegKey::GetExpandStringValue(
 {
     _ASSERTE(IsValid());
 
-    DWORD flags = RRF_RT_REG_EXPAND_SZ;
+    DWORD flags = RRF_RT_REG_EXPAND_SZ | RRF_RT_REG_SZ;
 
     // Adjust the flag for RegGetValue considering the expand string option specified by the caller
     if (expandOption == ExpandStringOption::DontExpand)
@@ -811,7 +812,7 @@ inline std::wstring RegKey::GetExpandStringValue(
 
     // Get the size of the result string
     DWORD dataSize = 0; // size of data, in bytes
-    LONG retCode = ::RegGetValue(
+    LONG retCode = ::RegGetValueW(
         m_hKey,
         nullptr, // no subkey
         valueName.c_str(),
@@ -831,7 +832,7 @@ inline std::wstring RegKey::GetExpandStringValue(
     result.resize(dataSize / sizeof(wchar_t));
 
     // Call RegGetValue for the second time to read the string's content
-    retCode = ::RegGetValue(
+    retCode = ::RegGetValueW(
         m_hKey,
         nullptr, // no subkey
         valueName.c_str(),
@@ -971,6 +972,9 @@ inline DWORD RegKey::QueryValueType(const std::wstring &valueName)
 
     if (retCode != ERROR_SUCCESS)
     {
+        if (retCode == ERROR_FILE_NOT_FOUND) {
+          return REG_NONE;
+        }
         throw RegException{"Cannot get the value type: RegQueryValueEx failed.", retCode};
     }
 
