@@ -41,6 +41,9 @@ class RegKey : public Napi::ObjectWrap<RegKey> {
   Napi::Value EnumValues(const Napi::CallbackInfo& info);
   Napi::Value IsValid(const Napi::CallbackInfo& info);
 
+  void Finalize(Napi::Env env) {
+    _key.Close();
+  }
  private:
   winreg::RegKey _key;
   Napi::Value createKey(const Napi::CallbackInfo& info);
